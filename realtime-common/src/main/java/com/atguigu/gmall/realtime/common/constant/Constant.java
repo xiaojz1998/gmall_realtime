@@ -14,7 +14,7 @@ public class Constant {
     public static final int MYSQL_PORT = 3306;
     public static final String MYSQL_USER_NAME = "root";
     public static final String MYSQL_PASSWORD = "123456";
-    public static final String HBASE_NAMESPACE = "gmall";
+    public static final String HBASE_NAMESPACE = "gmall0620";
 
     public static final String MYSQL_DRIVER = "com.mysql.cj.jdbc.Driver";
     public static final String MYSQL_URL = "jdbc:mysql://hadoop102:3306?useSSL=false";
