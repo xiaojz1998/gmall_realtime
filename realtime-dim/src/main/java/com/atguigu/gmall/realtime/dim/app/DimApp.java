@@ -9,6 +9,7 @@ import com.ververica.cdc.connectors.mysql.source.MySqlSource;
 import com.ververica.cdc.debezium.JsonDebeziumDeserializationSchema;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.MapFunction;
+import org.apache.flink.api.common.functions.RichMapFunction;
 import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.api.common.serialization.DeserializationSchema;
 import org.apache.flink.api.common.state.BroadcastState;
@@ -29,7 +30,7 @@ import org.apache.flink.streaming.api.environment.CheckpointConfig;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.ProcessFunction;
 import org.apache.flink.streaming.api.functions.co.BroadcastProcessFunction;
-import org.apache.flink.streaming.api.functions.sink.SinkFunction;
+import org.apache.flink.streaming.api.functions.sink.RichSinkFunction;
 import org.apache.flink.util.Collector;
 import org.apache.hadoop.hbase.client.Connection;
 
@@ -196,12 +197,21 @@ public class DimApp {
 
         //TODO 6.根据配置表中的配置信息在HBase中执行建表或者删表操作
         tpDS = tpDS.map(
-                new MapFunction<TableProcessDim, TableProcessDim>() {
+                new RichMapFunction<TableProcessDim, TableProcessDim>() {
+                    private Connection hBaseConn;
+                    @Override
+                    public void open(Configuration parameters) throws Exception {
+                        hBaseConn = HBaseUtil.getHBaseConnection();
+                    }
+
+                    @Override
+                    public void close() throws Exception {
+                        HBaseUtil.closeHBaseConnection(hBaseConn);
+                    }
                     @Override
                     public TableProcessDim map(TableProcessDim tp) throws Exception {
                         //获取对配置表进行操作的类型
                         String op = tp.getOp();
-                        Connection hBaseConn = HBaseUtil.getHBaseConnection();
                         String sinkTable = tp.getSinkTable();
                         String[] families = tp.getSinkFamily().split(",");
                         if("r".equals(op)||"c".equals(op)){
@@ -317,7 +327,18 @@ public class DimApp {
         });
         //TODO 10.将维度数据同步到HBase
         dimDS.print();
-        dimDS.addSink(new SinkFunction<Tuple2<JSONObject, TableProcessDim>>() {
+        dimDS.addSink(new RichSinkFunction<Tuple2<JSONObject, TableProcessDim>>() {
+            private Connection hBaseConn;
+            @Override
+            public void open(Configuration parameters) throws Exception {
+                hBaseConn = HBaseUtil.getHBaseConnection();
+            }
+
+            @Override
+            public void close() throws Exception {
+                HBaseUtil.closeHBaseConnection(hBaseConn);
+            }
+
             @Override
             public void invoke(Tuple2<JSONObject, TableProcessDim> tup2, Context context) throws Exception {
                 JSONObject dataJsonObj = tup2.f0;
@@ -326,12 +347,16 @@ public class DimApp {
                 String type = dataJsonObj.getString("type");
                 dataJsonObj.remove("type");
 
+                String sinkTable = tableProcessDim.getSinkTable();
+                //注意：获取的是rowkey的值
+                String rowKey = dataJsonObj.getString(tableProcessDim.getSinkRowKey());
                 if("delete".equals(type)){
                     //说明从业务数据库的维度表中删除了一条数据    从Hbase表中也少删除这条数据
-
+                    HBaseUtil.delRow(hBaseConn,Constant.HBASE_NAMESPACE,sinkTable,rowKey);
                 }else {
                     //insert、update、bootstrap-insert     对HBase进行put操作
-
+                    String sinkFamily = tableProcessDim.getSinkFamily();
+                    HBaseUtil.putRow(hBaseConn,Constant.HBASE_NAMESPACE,sinkTable,rowKey,sinkFamily,dataJsonObj);
                 }
             }
         });
