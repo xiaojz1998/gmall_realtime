@@ -8,7 +8,6 @@ import org.apache.flink.configuration.RestOptions;
 import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.streaming.api.CheckpointingMode;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
-import org.apache.flink.streaming.api.environment.CheckpointConfig;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 
 /**
@@ -33,6 +32,9 @@ public abstract class BaseApp {
         env.setParallelism(parallelism);
 
         //TODO 2.检查点相关的设置
+        env.enableCheckpointing(5000L, CheckpointingMode.EXACTLY_ONCE);
+        env.setRestartStrategy(RestartStrategies.fixedDelayRestart(3,3000L));
+        /*
         //2.1 开启检查点
         env.enableCheckpointing(5000L, CheckpointingMode.EXACTLY_ONCE);
         CheckpointConfig checkpointConfig = env.getCheckpointConfig();
@@ -46,16 +48,17 @@ public abstract class BaseApp {
         env.setRestartStrategy(RestartStrategies.fixedDelayRestart(3,3000L));
         //env.setRestartStrategy(RestartStrategies.failureRateRestart(3, Time.days(30),Time.seconds(3)));
         //2.6 设置状态后端
-        /*
+        *//*
                                         状态                  检查点
             hashmap                   TM堆内存                JM堆内存
             rocksDB                   RocksDB库              文件系统
-        */
+        *//*
         //env.setStateBackend(new HashMapStateBackend());
         //2.7 设置检查点存储路径
         checkpointConfig.setCheckpointStorage("hdfs://hadoop102:8020/ck/" + ckAndGroupId );
         //2.8 设置操作hadoop的用户
         System.setProperty("HADOOP_USER_NAME","atguigu");
+        */
 
         //TODO 3.从kafka主题中读取主流业务数据
         //3.2 创建消费者对象
