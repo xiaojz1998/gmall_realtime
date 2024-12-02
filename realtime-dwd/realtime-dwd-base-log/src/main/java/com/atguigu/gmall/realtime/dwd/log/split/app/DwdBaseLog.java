@@ -1,6 +1,7 @@
 package com.atguigu.gmall.realtime.dwd.log.split.app;
 
 import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import com.atguigu.gmall.realtime.common.base.BaseApp;
 import com.atguigu.gmall.realtime.common.constant.Constant;
@@ -132,14 +133,94 @@ public class DwdBaseLog extends BaseApp {
                 }
         );
 
-        fixedDS.print();
+        //fixedDS.print();
 
         //TODO 3.分流    错误日志-错误侧输出流  启动日志-启动侧输出流  曝光日志-曝光侧输出流  动作日志-动作侧输出流  页面日志-主流
         //3.1 定义侧输出流标签
+        OutputTag<String> errTag = new OutputTag<String>("errTag"){};
+        OutputTag<String> startTag = new OutputTag<String>("startTag"){};
+        OutputTag<String> displayTag = new OutputTag<String>("displayTag"){};
+        OutputTag<String> actionTag = new OutputTag<String>("actionTag"){};
         //3.2 分流
+        SingleOutputStreamOperator<String> pageDS = fixedDS.process(
+                new ProcessFunction<JSONObject, String>() {
+                    @Override
+                    public void processElement(JSONObject jsonObj, ProcessFunction<JSONObject, String>.Context ctx, Collector<String> out) throws Exception {
+                        //~~~错误日志~~~
+                        JSONObject errJsonObj = jsonObj.getJSONObject("err");
+                        if(errJsonObj != null){
+                            //将错误日志放到错误侧输出流
+                            ctx.output(errTag,jsonObj.toJSONString());
+                            jsonObj.remove("err");
+                        }
+
+                        JSONObject startJsonObj = jsonObj.getJSONObject("start");
+                        if(startJsonObj != null){
+                            //~~~启动日志~~~
+                            //将启动日志放到启动侧输出流
+                            ctx.output(startTag, jsonObj.toJSONString());
+                        }else {
+                            //~~~页面日志~~~
+                            JSONObject commonJsonObj = jsonObj.getJSONObject("common");
+                            JSONObject pageJsonObj = jsonObj.getJSONObject("page");
+                            Long ts = jsonObj.getLong("ts");
+
+                            //~~~曝光日志~~~
+                            JSONArray displayArr = jsonObj.getJSONArray("displays");
+                            if(displayArr != null && displayArr.size() > 0){
+                                //遍历曝光数据
+                                for (int i = 0; i < displayArr.size(); i++) {
+                                    JSONObject displayJsonObj = displayArr.getJSONObject(i);
+                                    //创建一个新的json对象，用于封装每一条曝光行为
+                                    JSONObject newDisplayJsonObj = new JSONObject();
+                                    newDisplayJsonObj.put("common",commonJsonObj);
+                                    newDisplayJsonObj.put("page",pageJsonObj);
+                                    newDisplayJsonObj.put("display",displayJsonObj);
+                                    newDisplayJsonObj.put("ts",ts);
+                                    //将曝光数据放到曝光侧输出流
+                                    ctx.output(displayTag, newDisplayJsonObj.toJSONString());
+                                }
+                                jsonObj.remove("displays");
+                            }
+
+                            //~~~动作日志日志~~~
+                            JSONArray actionArr = jsonObj.getJSONArray("actions");
+                            if(actionArr != null && actionArr.size() > 0){
+                                for (int i = 0; i < actionArr.size(); i++) {
+                                    JSONObject actionJsonObj = actionArr.getJSONObject(i);
+                                    //定义一个新的json对象，用于封装每一条动作信息
+                                    JSONObject newActionJsonObj = new JSONObject();
+                                    newActionJsonObj.put("common", commonJsonObj);
+                                    newActionJsonObj.put("page", pageJsonObj);
+                                    newActionJsonObj.put("action", actionJsonObj);
+                                    //将动作数据放到动作侧输出流
+                                    ctx.output(actionTag, newActionJsonObj.toJSONString());
+                                }
+                                jsonObj.remove("actions");
+                            }
+
+                            //页面日志放到主流中
+                            out.collect(jsonObj.toJSONString());
+                        }
+
+                    }
+                }
+        );
+        SideOutputDataStream<String> errDS = pageDS.getSideOutput(errTag);
+        SideOutputDataStream<String> startDS = pageDS.getSideOutput(startTag);
+        SideOutputDataStream<String> displayDS = pageDS.getSideOutput(displayTag);
+        SideOutputDataStream<String> actionDS = pageDS.getSideOutput(actionTag);
+        pageDS.print("page:");
+        errDS.print("err:");
+        startDS.print("start:");
+        displayDS.print("display:");
+        actionDS.print("action:");
         //3.3 将不同流的数据写到kafka不同主题中
-
-
+        pageDS.sinkTo(FlinkSinkUtil.getKafkaSink(Constant.TOPIC_DWD_TRAFFIC_PAGE));
+        errDS.sinkTo(FlinkSinkUtil.getKafkaSink(Constant.TOPIC_DWD_TRAFFIC_ERR));
+        startDS.sinkTo(FlinkSinkUtil.getKafkaSink(Constant.TOPIC_DWD_TRAFFIC_START));
+        displayDS.sinkTo(FlinkSinkUtil.getKafkaSink(Constant.TOPIC_DWD_TRAFFIC_DISPLAY));
+        actionDS.sinkTo(FlinkSinkUtil.getKafkaSink(Constant.TOPIC_DWD_TRAFFIC_ACTION));
     }
 
 }

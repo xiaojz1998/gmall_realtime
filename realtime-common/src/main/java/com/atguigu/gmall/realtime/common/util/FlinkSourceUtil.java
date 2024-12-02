@@ -27,7 +27,7 @@ public class FlinkSourceUtil {
                 .setStartingOffsets(OffsetsInitializer.latest())
                 //.setProperty(ConsumerConfig.ISOLATION_LEVEL_CONFIG,"read_committed")
                 //注意：如果使用Flink提供的针对字符串进行反序列化的SimpleStringSchema，不能处理从kafka读取到的空消息
-                //如果要向处理空消息，需要自定义反序列化的实现
+                //如果要处理空消息，需要自定义反序列化的实现
                 .setValueOnlyDeserializer(new DeserializationSchema<String>() {
                     @Override
                     public String deserialize(byte[] message) throws IOException {
