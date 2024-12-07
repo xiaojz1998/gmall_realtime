@@ -44,4 +44,16 @@ public class SQLUtil {
                 "  'value.format' = 'json'\n" +
                 ")";
     }
+
+    //获取Doris连接器的连接属性
+    public static String getDorisDDL(String tableName){
+        return  "       WITH (\n" +
+                "      'connector' = 'doris',\n" +
+                "      'fenodes' = '"+Constant.DORIS_FE_NODES+"',\n" +
+                "      'table.identifier' = '"+Constant.DORIS_DATABASE+"."+tableName+"',\n" +
+                "      'username' = 'root',\n" +
+                "      'password' = 'aaaaaa',\n" +
+                "      'sink.enable-2pc' = 'false'\n" +
+                ")";
+    }
 }
