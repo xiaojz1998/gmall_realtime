@@ -1,13 +1,19 @@
 package com.atguigu.gmall.realtime.common.util;
 
 import com.alibaba.fastjson.JSONObject;
+import com.atguigu.gmall.realtime.common.constant.Constant;
+import com.google.common.base.CaseFormat;
+import org.apache.commons.beanutils.BeanUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.hbase.Cell;
+import org.apache.hadoop.hbase.CellUtil;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.client.*;
 import org.apache.hadoop.hbase.util.Bytes;
 
 import java.io.IOException;
+import java.util.List;
 import java.util.Set;
 
 /**
@@ -105,5 +111,53 @@ public class HBaseUtil {
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    /**
+     * 根据rowkey从HBase表中读取一条数据
+     * @param hbaseConn                 连接对象
+     * @param namespace                 表空间
+     * @param tableName                 表名
+     * @param rowkey                    rowkey
+     * @param clz                       要封装的对象类型
+     * @param isUnderlineToCamel        是否要将下划线转换为驼峰命名法
+     * @return
+     * @param <T>
+     */
+    public static <T>T getRow(Connection hbaseConn, String namespace, String tableName, String rowkey,Class<T> clz,boolean... isUnderlineToCamel){
+        boolean defaultIsUToC = false;  // 默认不执行下划线转驼峰
+
+        if (isUnderlineToCamel.length > 0) {
+            defaultIsUToC = isUnderlineToCamel[0];
+        }
+
+        TableName tableNameObj = TableName.valueOf(namespace, tableName);
+        try (Table table = hbaseConn.getTable(tableNameObj)){
+            Get get = new Get(Bytes.toBytes(rowkey));
+            Result result = table.get(get);
+            List<Cell> cells = result.listCells();
+            if(cells != null &&cells.size() > 0){
+                //定义一个对象，用于封装查询出来的这一行数据
+                T obj = clz.newInstance();
+                for (Cell cell : cells) {
+                    String columnName = Bytes.toString(CellUtil.cloneQualifier(cell));
+                    String columnValue = Bytes.toString(CellUtil.cloneValue(cell));
+                    if(defaultIsUToC){
+                        columnName = CaseFormat.LOWER_UNDERSCORE.to(CaseFormat.LOWER_CAMEL,columnName);
+                    }
+                    BeanUtils.setProperty(obj,columnName,columnValue);
+                }
+                return obj;
+            }
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+        return null;
+    }
+
+    public static void main(String[] args) {
+        Connection hBaseConn = getHBaseConnection();
+        System.out.println(getRow(hBaseConn, Constant.HBASE_NAMESPACE, "dim_base_trademark", "1", JSONObject.class));
+        closeHBaseConnection(hBaseConn);
     }
 }
