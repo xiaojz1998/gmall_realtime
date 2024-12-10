@@ -5,14 +5,13 @@ import com.alibaba.fastjson.JSONObject;
 import com.atguigu.gmall.realtime.common.base.BaseApp;
 import com.atguigu.gmall.realtime.common.bean.TradeSkuOrderBean;
 import com.atguigu.gmall.realtime.common.constant.Constant;
+import com.atguigu.gmall.realtime.common.function.DimMapFunction;
 import com.atguigu.gmall.realtime.common.util.DateFormatUtil;
-import com.atguigu.gmall.realtime.common.util.HBaseUtil;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.flink.api.common.eventtime.SerializableTimestampAssigner;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.api.common.functions.ReduceFunction;
-import org.apache.flink.api.common.functions.RichMapFunction;
 import org.apache.flink.api.common.state.StateTtlConfig;
 import org.apache.flink.api.common.state.ValueState;
 import org.apache.flink.api.common.state.ValueStateDescriptor;
@@ -29,7 +28,6 @@ import org.apache.flink.streaming.api.functions.windowing.WindowFunction;
 import org.apache.flink.streaming.api.windowing.assigners.TumblingEventTimeWindows;
 import org.apache.flink.streaming.api.windowing.windows.TimeWindow;
 import org.apache.flink.util.Collector;
-import org.apache.hadoop.hbase.client.Connection;
 
 import java.math.BigDecimal;
 
@@ -224,6 +222,7 @@ public class DwsTradeSkuOrderWindow extends BaseApp {
         );
         //reduceDS.print();
         //TODO 9.关联sku维度
+        /*
         //V1.0  维度关联的最基本的实现
         SingleOutputStreamOperator<TradeSkuOrderBean> withSkuInfoDS = reduceDS.map(
                 new RichMapFunction<TradeSkuOrderBean, TradeSkuOrderBean>() {
@@ -254,8 +253,83 @@ public class DwsTradeSkuOrderWindow extends BaseApp {
                     }
                 }
         );
+
+        //V2.0  旁路缓存
+        SingleOutputStreamOperator<TradeSkuOrderBean> withSkuInfoDS = reduceDS.map(
+                new RichMapFunction<TradeSkuOrderBean, TradeSkuOrderBean>() {
+                    Connection hBaseConn;
+                    Jedis jedis;
+                    @Override
+                    public void open(Configuration parameters) throws Exception {
+                        hBaseConn = HBaseUtil.getHBaseConnection();
+                        jedis = RedisUtil.getJedis();
+                    }
+
+                    @Override
+                    public void close() throws Exception {
+                        HBaseUtil.closeHBaseConnection(hBaseConn);
+                        RedisUtil.closeJedis(jedis);
+                    }
+
+                    @Override
+                    public TradeSkuOrderBean map(TradeSkuOrderBean orderBean) throws Exception {
+                        //根据流中对象获取要关联的维度的主键
+                        String skuId = orderBean.getSkuId();
+                        //先从缓存中获取对应的维度数据
+                        JSONObject dimJsonObj = RedisUtil.readDim(jedis, "dim_sku_info", skuId);
+                        if(dimJsonObj != null){
+                            //如果在缓存中，找到了对应的维度，直接将其进行返回(缓存命中)
+                            System.out.println("从Redis中获取到了维度数据");
+                        }else{
+                            //如果从缓存中没有找到要关联的维度，发送请求到HBase中查找
+                            dimJsonObj = HBaseUtil.getRow(hBaseConn,Constant.HBASE_NAMESPACE,"dim_sku_info",skuId, JSONObject.class);
+                            if(dimJsonObj != null){
+                                //将查询到的数据放到Redis中缓存起来，方便下次查询使用
+                                System.out.println("从HBase中获取到了维度数据");
+                                RedisUtil.writeDim(jedis,"dim_sku_info",skuId,dimJsonObj);
+                            }else {
+                                System.out.println("没有找到要关联的维度数据");
+                            }
+                        }
+                        if(dimJsonObj != null){
+                            //将维度属性补充到流中对象上
+                            orderBean.setSkuName(dimJsonObj.getString("sku_name"));
+                            orderBean.setSpuId(dimJsonObj.getString("spu_id"));
+                            orderBean.setTrademarkId(dimJsonObj.getString("tm_id"));
+                            orderBean.setCategory3Id(dimJsonObj.getString("category3_id"));
+                        }
+                        return orderBean;
+                    }
+                }
+        );
+         */
+        //V3.0 旁路缓存 + 模板方法
+        SingleOutputStreamOperator<TradeSkuOrderBean> withSkuInfoDS = reduceDS.map(
+                new DimMapFunction<TradeSkuOrderBean>() {
+                    @Override
+                    public void addDims(TradeSkuOrderBean orderBean, JSONObject dimJsonObj) {
+                        orderBean.setSkuName(dimJsonObj.getString("sku_name"));
+                        orderBean.setSpuId(dimJsonObj.getString("spu_id"));
+                        orderBean.setTrademarkId(dimJsonObj.getString("tm_id"));
+                        orderBean.setCategory3Id(dimJsonObj.getString("category3_id"));
+                    }
+
+                    @Override
+                    public String getTableName() {
+                        return "dim_sku_info";
+                    }
+
+                    @Override
+                    public String getRowKey(TradeSkuOrderBean orderBean) {
+                        return orderBean.getSkuId();
+                    }
+                }
+        );
         withSkuInfoDS.print();
+
         //TODO 10.关联spu维度
+
+
         //TODO 11.关联tm维度
         //TODO 12.关联category3维度
         //TODO 13.关联category2维度
