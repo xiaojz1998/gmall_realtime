@@ -2,6 +2,9 @@ package com.atguigu.gmall.realtime.common.util;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
+import io.lettuce.core.RedisClient;
+import io.lettuce.core.api.StatefulRedisConnection;
+import io.lettuce.core.api.async.RedisAsyncCommands;
 import org.apache.commons.lang3.StringUtils;
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.JedisPool;
@@ -49,6 +52,36 @@ public class RedisUtil {
         }
     }
 
+    //获取异步操作Redis的客户端
+    public static StatefulRedisConnection<String,String> getRedisAsyncConnection(){
+        System.out.println("~~~获取异步操作Redis的客户端~~~");
+        RedisClient redisClient = RedisClient.create("redis://hadoop102:6379/0");
+        StatefulRedisConnection<String, String> redisAsyncConn = redisClient.connect();
+        return redisAsyncConn;
+    }
+    //关闭异步操作Redis的客户端
+    public static void closeRedisAsyncConnection(StatefulRedisConnection<String, String> redisAsyncConn){
+        System.out.println("~~~关闭异步操作Redis的客户端~~~");
+        if(redisAsyncConn != null && redisAsyncConn.isOpen()){
+            redisAsyncConn.close();
+        }
+    }
+
+    //以异步的方式从Redis中读取数据
+    public static JSONObject readDimAsync(StatefulRedisConnection<String, String> redisAsyncConn,String tableName,String id){
+        String key = getKey(tableName, id);
+        RedisAsyncCommands<String, String> asyncCommands = redisAsyncConn.async();
+        try {
+            String dimJsonStr = asyncCommands.get(key).get();
+            if(StringUtils.isNotEmpty(dimJsonStr)){
+                JSONObject dimJsonObj = JSON.parseObject(dimJsonStr);
+                return dimJsonObj;
+            }
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+        return  null;
+    }
     //从Redis中读取数据
     public static JSONObject readDim(Jedis jedis,String tableName,String id){
         //拼接key
@@ -61,6 +94,14 @@ public class RedisUtil {
         }
         return null;
     }
+    //以异步的方式向Redis中放数据
+    public static void writeDimAsync(StatefulRedisConnection<String, String> redisAsyncConn,String tableName,String id,JSONObject dimJsonObj){
+        String key = getKey(tableName, id);
+        RedisAsyncCommands<String, String> asyncCommands = redisAsyncConn.async();
+        asyncCommands.setex(key,24*3600, dimJsonObj.toJSONString());
+    }
+
+
     //向Redis中放数据
     public static void writeDim(Jedis jedis,String tableName,String id,JSONObject dimJsonObj){
         String key = getKey(tableName, id);

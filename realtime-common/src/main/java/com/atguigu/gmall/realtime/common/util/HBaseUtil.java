@@ -22,6 +22,27 @@ import java.util.Set;
  * 操作HBase的工具类
  */
 public class HBaseUtil {
+    //获取异步连接
+    public static AsyncConnection getHBaseAsyncConnection(){
+        try {
+            Configuration conf = new Configuration();
+            conf.set("hbase.zookeeper.quorum","hadoop102,hadoop103,hadoop104");
+            AsyncConnection hbaseAsyncConn = ConnectionFactory.createAsyncConnection(conf).get();
+            return hbaseAsyncConn;
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+    //关闭异步连接
+    public static void closeHBaseAsyncConnection(AsyncConnection hbaseAsyncConn){
+        if(hbaseAsyncConn != null && !hbaseAsyncConn.isClosed()){
+            try {
+                hbaseAsyncConn.close();
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        }
+    }
     //获取连接
     public static Connection getHBaseConnection(){
         try {
@@ -148,6 +169,29 @@ public class HBaseUtil {
                     BeanUtils.setProperty(obj,columnName,columnValue);
                 }
                 return obj;
+            }
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+        return null;
+    }
+
+    //以异步的方式从HBase表中读取数据
+    public static JSONObject readDimAsync(AsyncConnection hbaseAsyncConn,String namespace,String tableName,String rowkey){
+        TableName tableNameObj = TableName.valueOf(namespace, tableName);
+        AsyncTable<AdvancedScanResultConsumer> asyncTable = hbaseAsyncConn.getTable(tableNameObj);
+        Get get = new Get(Bytes.toBytes(rowkey));
+        try {
+            Result result = asyncTable.get(get).get();
+            List<Cell> cells = result.listCells();
+            if(cells != null && cells.size() > 0){
+                JSONObject dimJsonObj = new JSONObject();
+                for (Cell cell : cells) {
+                    String columnName = Bytes.toString(CellUtil.cloneQualifier(cell));
+                    String columnValue = Bytes.toString(CellUtil.cloneValue(cell));
+                    dimJsonObj.put(columnName,columnValue);
+                }
+                return dimJsonObj;
             }
         } catch (Exception e) {
             throw new RuntimeException(e);
